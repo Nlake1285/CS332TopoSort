@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Topological sort: walk it, don’t hold it</title>
+<style>
+:root{--bg:#f3f1ec;--fg:#1c2330;--mut:#7b8494;--card:#fff;--line:#d8d6cf;--acc:#1f6f78;--bad:#c8402f;--ok:#2d8a4e}
+@media(prefers-color-scheme:dark){:root{--bg:#141a22;--fg:#e8ecf2;--mut:#8b95a5;--card:#1d2630;--line:#33404f;--acc:#5cc3cf;--bad:#ff7b6a;--ok:#58c985}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 Georgia,"Times New Roman",serif}
+main{max-width:820px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.6rem;margin:.2em 0 .1em;line-height:1.2}
+.sub{color:var(--mut);margin:0 0 14px}
+nav{display:flex;gap:8px;margin:12px 0}
+nav button{font:inherit;font-size:.9rem;padding:6px 12px;border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:6px;cursor:pointer}
+nav button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+nav button:disabled{opacity:.4;cursor:default}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+svg{width:100%;height:auto;display:block}
+.nd{cursor:pointer;transition:opacity .35s}
+.nd text{font:700 17px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central;fill:var(--fg);pointer-events:none}
+.pulse circle{animation:pl 1.2s ease-in-out infinite}
+@keyframes pl{50%{stroke-width:6}}
+.msg{min-height:3.2em;margin:12px 0 8px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0;min-height:38px}
+.chip{font:700 15px system-ui,sans-serif;min-width:36px;text-align:center;padding:6px 8px;border:2px solid var(--fg);border-radius:6px;background:var(--card)}
+.chip.new{border-color:var(--acc);animation:pop .45s}
+@keyframes pop{from{transform:translateX(-14px);opacity:0}}
+.lbl{color:var(--mut);font-size:.85rem;margin-right:4px}
+.btn{font:600 15px system-ui,sans-serif;padding:9px 16px;border-radius:6px;border:2px solid var(--acc);background:var(--acc);color:var(--bg);cursor:pointer}
+.btn.alt{background:transparent;color:var(--acc)}
+.ok{color:var(--ok);font-weight:700}.bad{color:var(--bad);font-weight:700}
+details{margin:12px 0;padding:10px 12px;border:1px dashed var(--line);border-radius:8px}
+summary{cursor:pointer;font-weight:700}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+<h1>Topological sort: walk it, don’t hold it</h1>
+<p class="sub">Put the tasks in an order where every arrow points forward (A → B means A comes first).</p>
+<nav id="nav"></nav>
+<div id="app"></div>
+</main>
+<script>
+const N={D:[70,210],A:[190,80],G:[190,340],B:[340,210],J:[360,60],E:[390,360],H:[540,130],C:[500,250],I:[600,360],F:[710,210]};
+const E=[["D","A"],["D","G"],["A","B"],["A","J"],["G","B"],["G","E"],["B","H"],["B","C"],["J","E"],["J","H"],["E","C"],["E","I"],["H","I"],["C","F"],["I","F"]];
+const KEYS=Object.keys(N).sort();
+const COL={n:"var(--mut)",a:"var(--acc)",b:"var(--bad)"};
+const app=document.getElementById("app");
+let mode="tangle",order=[],visited,stack,fin,dir=1,warn="";
+
+function kids(k){const c=E.filter(e=>e[0]==k).map(e=>e[1]).sort();return dir>0?c:c.reverse()}
+function resetWalk(){visited=new Set();stack=[];fin=[];warn=""}
+resetWalk();
+
+function ln(a,b){const[x1,y1]=N[a],[x2,y2]=N[b],d=Math.hypot(x2-x1,y2-y1),ux=(x2-x1)/d,uy=(y2-y1)/d;return[x1+ux*24,y1+uy*24,x2-ux*27,y2-uy*27]}
+
+function graph(nodeFn,edgeFn){
+  let s=`<svg viewBox="0 0 760 420" role="img" aria-label="Directed graph with 10 nodes"><defs>`;
+  for(const k in COL)s+=`<marker id="m${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" style="fill:${COL[k]}"/></marker>`;
+  s+=`</defs>`;
+  for(const e of E){
+    const st=Object.assign({k:"n",o:1,w:1.8,d:""},edgeFn(e)),[x1,y1,x2,y2]=ln(e[0],e[1]);
+    s+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${COL[st.k]}" stroke-opacity="${st.o}" stroke-width="${st.w}" stroke-dasharray="${st.d}" marker-end="url(#m${st.k})" style="transition:stroke-opacity .35s"/>`;
+  }
+  for(const k of KEYS){
+    const st=Object.assign({o:1,sw:2,fill:"var(--card)",st:"var(--fg)",pulse:0},nodeFn(k));
+    s+=`<g class="nd${st.pulse?" pulse":""}" opacity="${st.o}" onclick="pick('${k}')"><circle cx="${N[k][0]}" cy="${N[k][1]}" r="22" fill="${st.fill}" stroke="${st.st}" stroke-width="${st.sw}"/><text x="${N[k][0]}" y="${N[k][1]}">${k}</text></g>`;
+  }
+  return s+`</svg>`;
+}
+
+function nav(){
+  const t=[["tangle","1. The tangle"],["walk","2. Blinders on"],["reveal","3. The reveal"]];
+  document.getElementById("nav").innerHTML=t.map(([m,l])=>`<button class="${mode==m?"on":""}" ${m=="reveal"&&fin.length<10?"disabled":""} onclick="go('${m}')">${l}</button>`).join("");
+}
+function go(m){mode=m;if(m=="walk"&&fin.length==10)resetWalk();render()}
+function chips(a,newFirst){return a.map((k,i)=>`<span class="chip${newFirst&&i==0?" new":""}">${k}</span>`).join("")}
+
+/* ---------- mode 1: tangle ---------- */
+function tangle(){
+  const pos=k=>order.indexOf(k);
+  const bad=E.filter(([u,v])=>pos(u)>-1&&pos(v)>-1&&pos(u)>pos(v));
+  const done=order.length==10&&!bad.length;
+  app.innerHTML=`<p class="msg">Click nodes to build an order, left to right. Every arrow must end up pointing forward. Broken arrows turn red.</p>
+  <div class="box">${graph(k=>({fill:pos(k)>-1?"var(--line)":"var(--card)"}),e=>bad.includes(e)?{k:"b",w:3}:{o:.6})}</div>
+  <div class="row"><span class="lbl">Your order:</span>${chips(order)}</div>
+  <p>${done?`<span class="ok">Valid order!</span> You did it with the whole graph in view. Now see how the blinders change things.`:`Placed ${order.length}/10 · broken arrows: <span class="${bad.length?"bad":""}">${bad.length}</span>`}</p>
+  <div class="row"><button class="btn alt" onclick="order.pop();render()">Undo</button><button class="btn alt" onclick="order=[];render()">Clear</button><button class="btn" onclick="go('walk')">Too tangled? Put the blinders on</button></div>`;
+}
+
+/* ---------- mode 2: walk ---------- */
+function target(){
+  if(fin.length==10)return null;
+  if(!stack.length)return{t:"start",n:KEYS.slice().sort((a,b)=>dir*a.localeCompare(b)).find(k=>!visited.has(k))};
+  const c=kids(stack[stack.length-1]).find(x=>!visited.has(x));
+  return c?{t:"go",n:c}:{t:"stamp"};
+}
+function step(){
+  const t=target();if(!t)return;warn="";
+  if(t.t=="stamp")fin.push(stack.pop());else{visited.add(t.n);stack.push(t.n)}
+  if(fin.length==10)mode="reveal";
+  render();
+}
+function pick(k){
+  if(mode=="tangle"){if(!order.includes(k)){order.push(k);render()}return}
+  if(mode!="walk")return;
+  const t=target(),cur=stack[stack.length-1];
+  if(t&&((t.t!="stamp"&&t.n==k)||(t.t=="stamp"&&k==cur)))step();
+  else{warn=t.t=="stamp"?`Not yet. ${cur} has nothing new to visit, so click ${cur} (or the button) to finish it.`:`Not that one. The rule: take the first edge you haven’t used (${dir>0?"alphabetical":"reverse alphabetical"}). Follow the glowing one.`;render()}
+}
+function walk(){
+  const t=target(),cur=stack[stack.length-1];
+  const nf=k=>k==cur?{sw:3.5,st:"var(--acc)"}:(t.t!="stamp"&&t.n==k)?{sw:3,st:"var(--acc)",pulse:1}:stack.includes(k)?{o:.5}:fin.includes(k)?{o:.3,fill:"var(--line)"}:{o:.1};
+  const ef=([u,v])=>{
+    if(u!=cur)return stack.includes(u)&&stack.indexOf(v)==stack.indexOf(u)+1&&stack.includes(v)?{o:.5}:{o:.04};
+    return t.t=="go"&&t.n==v?{k:"a",w:3.5}:{o:.6,d:"5 5"};
+  };
+  let m;
+  if(t.t=="start")m=`Nothing in progress. Start at the first untouched node: <b>${t.n}</b>.`;
+  else if(t.t=="go")m=`You’re at <b>${cur}</b>. Take the first edge you haven’t used: <b>${cur} → ${t.n}</b>. Every other edge is set aside, not deleted. You can ignore it for now.`;
+  else m=`<b>${cur}</b> has nothing new to visit, so it’s finished. Put it at the <b>front</b> of the list and step back.`;
+  const label=t.t=="stamp"?`Stamp ${cur} and step back`:t.t=="go"?`Follow ${cur} → ${t.n}`:`Start at ${t.n}`;
+  app.innerHTML=`<div class="box">${graph(nf,ef)}</div>
+  <p class="msg">${warn?`<span class="bad">${warn}</span>`:m}</p>
+  <div class="row"><button class="btn" onclick="step()">${label}</button><button class="btn alt" onclick="resetWalk();render()">Restart</button></div>
+  <div class="row"><span class="lbl">Path:</span>${stack.length?stack.join(" → "):"(none)"}</div>
+  <div class="row"><span class="lbl">List so far (new ones go in front):</span>${chips(fin.slice().reverse(),true)}</div>`;
+}
+
+/* ---------- mode 3: reveal ---------- */
+function reveal(){
+  const o=fin.slice().reverse(),X=i=>50+i*(660/9);
+  let s=`<svg viewBox="0 0 760 300" role="img" aria-label="Nodes in order with every arrow pointing right"><defs><marker id="rv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" style="fill:var(--acc)"/></marker></defs>`;
+  for(const[u,v]of E){const i=o.indexOf(u),j=o.indexOf(v),h=(j-i)*17+10;
+    s+=`<path d="M${X(i)} 196 Q${(X(i)+X(j))/2} ${196-2*h} ${X(j)-4} 194" fill="none" stroke="var(--acc)" stroke-width="1.8" stroke-opacity=".75" marker-end="url(#rv)"/>`}
+  o.forEach((k,i)=>{s+=`<g><circle cx="${X(i)}" cy="220" r="22" fill="var(--card)" stroke="var(--fg)" stroke-width="2"/><text x="${X(i)}" y="220" style="font:700 17px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central;fill:var(--fg)">${k}</text></g>`});
+  app.innerHTML=`<div class="box">${s}</svg></div>
+  <p class="msg"><span class="ok">Every arrow points right.</span> Order: <b>${o.join(", ")}</b></p>
+  <p><b>You never looked at the whole graph. So why did it work?</b></p>
+  <details><summary>One possible answer</summary><p>A node only gets stamped after everything it points to has been stamped. Each new stamp goes in front of the list, so anything a node points to is already sitting to its right when the node lands. The local rule (follow one edge, ignore the rest) guarantees the global property.</p></details>
+  <div class="row"><button class="btn" onclick="dir=-dir;resetWalk();mode='walk';render()">Redo it ${dir>0?"in reverse alphabetical order":"in alphabetical order"}</button><button class="btn alt" onclick="order=[];dir=1;resetWalk();mode='tangle';render()">Start over</button></div>
+  <p class="sub">Different rule, different valid order, same guarantee.</p>`;
+}
+
+function render(){nav();({tangle,walk,reveal})[mode]()}
+render();
+</script>
+</body>
+</html>
